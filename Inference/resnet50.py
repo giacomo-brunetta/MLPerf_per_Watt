@@ -37,6 +37,7 @@ if __name__ == "__main__":
     parser.add_argument("--precision", type=str, default='float', help= "fp32 | tf32 | fp16")
     parser.add_argument("--workers", type=int, default=25, help="Workers of dataloader")
     parser.add_argument("--compile", type=bool, default=True, help="Compile the model")
+    parser.add_argument("--hdf5", type=bool, default=True, help="Use dataset in HDF5 format")
 
     # Parse arguments
     args = parser.parse_args()
@@ -47,6 +48,7 @@ if __name__ == "__main__":
     workers = args.workers
     compile = args.compile
     precision = args.precision
+    hadoop = args.hdf5
 
     print("Batch size: ", batch_size)
     print("Workers: ", workers)
@@ -56,19 +58,18 @@ if __name__ == "__main__":
 
     # Define the transformation
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),  # ResNet expects 224x224 input
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Standard ImageNet normalization
     ])
 
     # get the dataset
-    hadoop = False
 
     if hadoop:
-        hdf5_file_path = 'processed_images.h5'
-        hdf5_dataset = HDF5Dataset(hdf5_file_path)
+        hdf5_file_path = os.path.join(os.getcwd(), '../Data/ImageNet/processed_images.h5')
+        dataset = HDF5Dataset(hdf5_file_path)
     else: 
-        dataset_path = os.path.join(os.getcwd(), '../Data/ImageNet/val')
+        dataset_path = os.path.join(os.getcwd(), '../Data')
         dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
 
     if profiler:
@@ -85,4 +86,4 @@ if __name__ == "__main__":
         print("Select a valid profiler (power | torch | nsight)")
     
     if hadoop:
-        hdf5_dataset.close()
+        dataset.close()
