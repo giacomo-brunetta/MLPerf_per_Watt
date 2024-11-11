@@ -25,14 +25,24 @@ class Profiler(Enum):
         else:
             return None
 
-def setup(model, dataset, device_name, batch_size, num_workers, compile):
+def setup(model, dataset, device_name, batch_size, num_workers, compile, precision):
     # Check if GPUs are available, otherwise fallback to CPU
     device = torch.device(device_name)
     print("Running on: ", device)
 
+    if precision == 'fp32':
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+    elif precision == 'tf32':
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
     # Load the model, then move the model to the device (GPU or CPU)
     model.eval()
     model.to(device)
+
+    if precision == 'fp16':
+        model = model.half()
 
     # Wrap the model for DataParallel
     if torch.cuda.device_count() > 1:
@@ -54,13 +64,15 @@ def setup(model, dataset, device_name, batch_size, num_workers, compile):
 
     return device, model, dataloader
 
-def inference(model, device, dataloader, profiler = None):
+def inference(model, device, dataloader, precision, profiler = None):
     correct = 0
 
     # Process images in batches from the DataLoader
     for batch_images, batch_labels in dataloader:  # Unpack images and labels
         # Transfer the batch to the GPU asynchronously
         batch_images = batch_images.to(device, non_blocking=True)
+        if precision == 'fp16':
+            batch_images = batch_images.half()
         batch_labels = batch_labels.to(device, non_blocking=True)
 
         # Perform inference
@@ -77,9 +89,9 @@ def inference(model, device, dataloader, profiler = None):
     
     return correct
 
-def power_profile_inference(model, dataset, device_name, interval, batch_size, num_workers, compile):
+def power_profile_inference(model, dataset, device_name, interval, batch_size, num_workers, compile, precision):
 
-    device, model, dataloader = setup(model, dataset, device_name, batch_size, num_workers, compile)
+    device, model, dataloader = setup(model, dataset, device_name, batch_size, num_workers, compile, precision)
 
     # Profile with gpuPowerProbe
     power_profiles = []
@@ -89,7 +101,7 @@ def power_profile_inference(model, dataset, device_name, interval, batch_size, n
 
     start_time = time.perf_counter()
     # Actual workload
-    correct = inference(model, device, dataloader)
+    correct = inference(model, device, dataloader, precision)
 
     latency = time.perf_counter() - start_time
 
@@ -142,8 +154,8 @@ def power_profile_inference(model, dataset, device_name, interval, batch_size, n
     plt.ylabel('Power Consumption (W)')
     plt.savefig('gpu_power_plot.png')
 
-def torch_profile_inference(model, dataset, device_name, batch_size, num_workers, compile):
-    device, model, dataloader = setup(model, dataset, device_name, batch_size, num_workers, compile)
+def torch_profile_inference(model, dataset, device_name, batch_size, num_workers, compile, precision):
+    device, model, dataloader = setup(model, dataset, device_name, batch_size, num_workers, compile, precision)
 
     start_time = time.perf_counter()
     # Using torch profiler
@@ -159,7 +171,7 @@ def torch_profile_inference(model, dataset, device_name, batch_size, num_workers
         profile_memory=True,
         with_stack=False  # Disable stack tracing to avoid the replay stack issue
     ) as prof:
-        correct = inference(model, device, dataloader, profiler=prof)
+        correct = inference(model, device, dataloader, precision, profiler=prof)
         pass
 
     # Stats
@@ -178,8 +190,8 @@ def torch_profile_inference(model, dataset, device_name, batch_size, num_workers
     print(f"Throughput: {throughput :.2f} imgs/s")
     print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
-def nsight_profile_inference(model, dataset, device_name, batch_size, num_workers, compile):
-    device, model, dataloader = setup(model, dataset, device_name, batch_size, num_workers, compile)
+def nsight_profile_inference(model, dataset, device_name, batch_size, num_workers, compile, precision):
+    device, model, dataloader = setup(model, dataset, device_name, batch_size, num_workers, compile, precision)
 
     # Actual workload
     start_time = time.perf_counter()
@@ -187,7 +199,7 @@ def nsight_profile_inference(model, dataset, device_name, batch_size, num_worker
 
     # Process images in batches from the DataLoader
     with nvtx.annotate("Inference:"):
-        correct = inference(model, device, dataloader)
+        correct = inference(model, device, dataloader, precision)
 
     latency = time.perf_counter() - start_time
     
@@ -205,12 +217,12 @@ def nsight_profile_inference(model, dataset, device_name, batch_size, num_worker
     print(f"Latency: {latency :.2f} s")
     print(f"Throughput: {throughput :.2f} imgs/s")
 
-def profile_with(profiler, model, dataset, device_name, interval, batch_size, num_workers, compile):
+def profile_with(profiler, model, dataset, device_name, interval, batch_size, num_workers, compile, precision):
     if profiler == Profiler.POWER:
-        power_profile_inference(model, dataset, device_name, interval, batch_size, num_workers, compile)
+        power_profile_inference(model, dataset, device_name, interval, batch_size, num_workers, compile, precision)
     elif profiler == Profiler.TORCH:
-        torch_profile_inference(model, dataset, device_name, batch_size, num_workers, compile)
+        torch_profile_inference(model, dataset, device_name, batch_size, num_workers, compile, precision)
     elif profiler == Profiler.NSIGHT:
-        nsight_profile_inference(model, dataset, device_name, batch_size, num_workers, compile)
+        nsight_profile_inference(model, dataset, device_name, batch_size, num_workers, compile, precision)
     else:
         print("Please select a valid profiler")

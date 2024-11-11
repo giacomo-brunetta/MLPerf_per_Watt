@@ -4,6 +4,29 @@ import os
 from utils.profiling_utils import Profiler, profile_with
 import argparse
 
+import h5py
+import torch
+from torch.utils.data import Dataset, DataLoader
+
+class HDF5Dataset(Dataset):
+    def __init__(self, hdf5_file_path):
+        self.h5_file = h5py.File(hdf5_file_path, 'r')
+        self.images = self.h5_file['images']
+        self.labels = self.h5_file['labels']
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        # Load image and label asynchronously
+        image = torch.tensor(self.images[idx], dtype=torch.float32)
+        label = torch.tensor(self.labels[idx], dtype=torch.long)
+        return image, label
+
+    def close(self):
+        self.h5_file.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Profile ResNet50")
 
@@ -11,6 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("device", type=str, help="The device to run on (cpu | cuda)")
     parser.add_argument("profiler", type=str, help="The profiler (power | torch | nsight)")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
+    parser.add_argument("--precision", type=str, default='float', help= "fp32 | tf32 | fp16")
     parser.add_argument("--workers", type=int, default=25, help="Workers of dataloader")
     parser.add_argument("--compile", type=bool, default=True, help="Compile the model")
 
@@ -22,9 +46,11 @@ if __name__ == "__main__":
     batch_size = args.batch_size
     workers = args.workers
     compile = args.compile
+    precision = args.precision
 
     print("Batch size: ", batch_size)
     print("Workers: ", workers)
+    print("precision: ", precision)
 
     model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
 
@@ -36,9 +62,14 @@ if __name__ == "__main__":
     ])
 
     # get the dataset
-    dataset_path = os.path.join(os.getcwd(), '../Data/ImageNet/val')
+    hadoop = False
 
-    dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
+    if hadoop:
+        hdf5_file_path = 'processed_images.h5'
+        hdf5_dataset = HDF5Dataset(hdf5_file_path)
+    else: 
+        dataset_path = os.path.join(os.getcwd(), '../Data/ImageNet/val')
+        dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
 
     if profiler:
         profile_with(profiler,
@@ -48,6 +79,10 @@ if __name__ == "__main__":
                      batch_size=batch_size,
                      num_workers=workers,
                      interval=0.1,
-                     compile=compile)
+                     compile=compile,
+                     precision=precision)
     else:
         print("Select a valid profiler (power | torch | nsight)")
+    
+    if hadoop:
+        hdf5_dataset.close()
