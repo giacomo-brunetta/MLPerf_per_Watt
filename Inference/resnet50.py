@@ -6,7 +6,7 @@ import argparse
 
 import h5py
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 class HDF5Dataset(Dataset):
     def __init__(self, hdf5_file_path):
@@ -34,10 +34,11 @@ if __name__ == "__main__":
     parser.add_argument("device", type=str, help="The device to run on (cpu | cuda)")
     parser.add_argument("profiler", type=str, help="The profiler (power | torch | nsight)")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
-    parser.add_argument("--precision", type=str, default='float', help= "fp32 | tf32 | fp16")
+    parser.add_argument("--precision", type=str, default='fp32', help= "fp32 | tf32 | fp16")
     parser.add_argument("--workers", type=int, default=25, help="Workers of dataloader")
     parser.add_argument("--compile", type=bool, default=True, help="Compile the model")
-    parser.add_argument("--hdf5", type=bool, default=True, help="Use dataset in HDF5 format")
+    parser.add_argument("--hdf5", type=bool, default=False, help="Use dataset in HDF5 format")
+    parser.add_argument("--path", type=str, default=os.path.join(os.getcwd(), '../Data'), help="Path to dataset")
 
     # Parse arguments
     args = parser.parse_args()
@@ -56,20 +57,19 @@ if __name__ == "__main__":
 
     model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
 
-    # Define the transformation
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Standard ImageNet normalization
-    ])
-
     # get the dataset
 
     if hadoop:
         hdf5_file_path = os.path.join(os.getcwd(), '../Data/ImageNet/processed_images.h5')
         dataset = HDF5Dataset(hdf5_file_path)
     else: 
-        dataset_path = os.path.join(os.getcwd(), '../Data')
+        # Define the transformation
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Standard ImageNet normalization
+        ])
+        dataset_path = args.path
         dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
 
     if profiler:
@@ -79,7 +79,7 @@ if __name__ == "__main__":
                      device,
                      batch_size=batch_size,
                      num_workers=workers,
-                     interval=0.1,
+                     interval=0.01,
                      compile=compile,
                      precision=precision)
     else:
